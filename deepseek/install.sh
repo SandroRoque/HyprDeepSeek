@@ -133,7 +133,9 @@ say "linked deepseek-price and $FONT_NAME"
 
 # 3. font cache so Pango/Waybar can resolve 'DeepSeek Whale' ----------------
 fc-cache -f "$WB_FONTS" >/dev/null 2>&1 || true
-if fc-list | grep -qi "DeepSeek Whale"; then
+# Do not use grep -q here: with pipefail, an early match can close the pipe,
+# make fc-list exit on SIGPIPE, and turn a successful lookup into status 141.
+if fc-list | grep -Fi "DeepSeek Whale" >/dev/null; then
   say "font registered"
 else
   echo "ERROR: font did not register with fontconfig"; exit 1

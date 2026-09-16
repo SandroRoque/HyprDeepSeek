@@ -1,58 +1,120 @@
 # HyprDeepSeek
 
-Waybar and Hyprland customisations.
+A small collection of Hyprland and Waybar customizations, led by a live
+DeepSeek API pricing indicator for Waybar.
 
-## `deepseek/` — DeepSeek rate whale for Waybar
+## DeepSeek rate whale
 
-A DeepSeek mark in the bar that is **green when API rates are off-peak** and
-**red during peak hours**, with a hover tooltip showing the next rate change and
-the current per-million-token prices.
+The whale gives you the current DeepSeek pricing window at a glance:
 
-Self-contained and installable on any Omarchy/Arch machine with Waybar:
+- **Green** — off-peak pricing (50% discount)
+- **Red** — peak pricing
+- **Hover** — current rates, the next price change, and a local-time countdown
+- **Click** — show the same information in a desktop notification
+
+DeepSeek's peak windows are Monday–Friday, **01:00–04:00 UTC** and
+**06:00–10:00 UTC**. The tooltip converts those windows and the next change to
+your local time automatically.
+
+### Install
+
+On an Omarchy or Arch system with Waybar:
 
 ```sh
-git clone <this repo> ~/Documents/Projects/HyprDeepSeek
-cd ~/Documents/Projects/HyprDeepSeek/deepseek
+git clone https://github.com/SandroRoque/HyprDeepSeek.git
+cd HyprDeepSeek/deepseek
 ./install.sh
 ```
 
-See [`deepseek/README.md`](deepseek/README.md) for the layout, the two CSS rules
-that form the state machine, and how to adjust colours, refresh rate or prices.
-`./install.sh uninstall` reverses everything.
+The installer links the script and bundled whale font into your user
+directories, updates your existing Waybar config and stylesheet, refreshes the
+font cache, verifies that Pango can render the glyph, and restarts Waybar. It
+does not need `sudo` or install anything system-wide.
 
-Peak hours (DeepSeek docs): Mon-Fri 01:00-04:00 and 06:00-10:00 UTC; all other
-times are off-peak at half the rate.
+Requirements: `bash`, `jq`, `python3`, `fontconfig`, and Waybar. `pango-view`
+and ImageMagick enable the installer's extra glyph-rendering check. A default
+Omarchy installation already includes them.
 
-## `font-preview.py` — glyph browser
+### Manage the installation
 
-Renders the glyphs of any installed font into labelled PNG sheets (codepoint
-printed under each glyph), so a glyph can be picked by eye and pasted into a
-config as `\uXXXX`:
+Run these commands from `HyprDeepSeek/deepseek`:
 
 ```sh
-python3 font-preview.py --list                                    # families + counts
+./install.sh status       # show the active script, font, and pricing state
+./install.sh              # install, update, or repair the integration
+./install.sh --force      # switch an install from a different checkout
+./install.sh uninstall    # remove the module, styles, script, and font
+```
+
+The install is idempotent, so it is safe to rerun after `git pull`. Resources
+are symlinked to the checkout, making local changes immediately available. To
+avoid silently hijacking a working setup, another clone must use `--force`.
+
+### Customize it
+
+| Change | Location |
+|---|---|
+| Peak and off-peak colors | `~/.config/waybar/style.css` |
+| Glyph size and spacing | `#custom-deepseek` in the same stylesheet |
+| Refresh interval | `custom/deepseek` in `~/.config/waybar/config.jsonc` |
+| Pricing schedule or rates | `deepseek/resources/deepseek-price` |
+| Tooltip wording | `deepseek/resources/deepseek-price` |
+
+Re-running the installer restores the module block and its default CSS rules,
+so keep durable project changes in this repository.
+
+### Troubleshooting
+
+Check what is installed and where each symlink points:
+
+```sh
+./install.sh status
+```
+
+If the installer stops, its error identifies the failing stage. Useful manual
+checks are:
+
+```sh
+fc-list | grep -F "DeepSeek Whale"   # bundled font is registered
+fc-match "DeepSeek Whale"            # Fontconfig selects the expected family
+tail -n 50 "${XDG_RUNTIME_DIR:-/tmp}/deepseek-waybar.log"
+```
+
+If you moved or recloned the repository, run `./install.sh --force` so the
+installed symlinks point to the new checkout.
+
+For implementation details—including the font-based rendering approach and
+repository layout—see [the DeepSeek module guide](deepseek/README.md).
+
+## Font preview utility
+
+`font-preview.py` renders an installed font into labeled PNG contact sheets.
+Use it to find a glyph visually and copy its Unicode code point into a config:
+
+```sh
+python3 font-preview.py --list
 python3 font-preview.py --font "JetBrainsMono Nerd Font" --range e000-e0ff
 python3 font-preview.py --font "Font Awesome 7 Free" --range f000-f8ff --cols 10 --rows 8
 ```
 
-Sheets go to `--out` (default `~/Downloads/font-glyphs/`); page names embed the
-codepoint range so repeated runs never overwrite each other.
+Output goes to `~/Downloads/font-glyphs/` by default. Page filenames include
+their code-point range, so repeated runs do not overwrite earlier sheets.
 
-Online equivalents: [Nerd Fonts cheat sheet](https://www.nerdfonts.com/cheat-sheet),
-[Font Awesome 7 Free](https://fontawesome.com/search?o=r&m=free).
+## Development
 
-### Glyph notes worth keeping
+Run the lightweight checks before committing:
 
-- Font Awesome 7 Free has **no whale**: `U+F48B` is a truck, and its charset
-  jumps `1F409` -> `1F40E`. It covers `1F41F` fish, `1F6A2` ship.
-- Noto Color Emoji has `U+1F40B` WHALE and `U+1F433` SPOUTING WHALE, but they are
-  colour glyphs, so CSS `color` will not tint them.
-- Nerd Fonts' whale glyph is the Docker logo, not a generic whale.
+```sh
+make -C deepseek check
+```
 
-## History
+The built `DeepSeekWhale.ttf` is committed, so users do not need font tooling.
+Only regenerating it requires `fontforge` and `python-fonttools`:
 
-The mark started as a hand-drawn SVG, moved through per-state PNGs swapped by
-files, and ended as a **glyph in a font with colour coming from CSS** — which is
-what lets one Waybar text module show the mark *and* carry a normal JSON tooltip.
-Discarded approaches were deleted; `deepseek/lib/build-font.py` is the only
-generator.
+```sh
+make -C deepseek font
+```
+
+The whale began as an SVG, briefly used per-state PNG files, and now lives at
+`U+E900` in a tiny custom font. That lets a standard Waybar text module tint the
+mark with CSS while retaining a native JSON tooltip.
