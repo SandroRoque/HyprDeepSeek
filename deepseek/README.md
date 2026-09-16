@@ -28,7 +28,17 @@ resources into place (so this repo stays the source of truth, nothing is copied)
 registers the font, patches `~/.config/waybar/config.jsonc` and `style.css` in
 place, and restarts Waybar.
 
-To undo everything: `./install.sh uninstall`.
+```sh
+./install.sh            # install / update from this checkout
+./install.sh status     # what is currently live, and where it points
+./install.sh --force    # take over from a different checkout
+./install.sh uninstall  # remove module, symlinks and font
+```
+
+Because the resources are symlinked, **a second checkout cannot silently take
+over**: if an install already points at another path, `install.sh` prints both
+paths and exits non-zero without changing anything. Use `--force` when you
+genuinely mean to switch.
 
 ## Layout
 
