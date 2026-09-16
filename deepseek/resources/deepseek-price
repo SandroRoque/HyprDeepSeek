@@ -61,7 +61,11 @@ for ((t = NOW_EPOCH + 60; t <= NOW_EPOCH + 60 * 60 * 24 * 11; t += 60)); do
   fi
 done
 
-SECS_TO_CHANGE=$(( (NEXT_WMIN - WMIN + 10080) % 10080 * 60 ))
+# Real elapsed time to the next transition. Deriving this from week-minutes
+# mangles it whenever the target sits earlier in the scrubbed 0..10079 window
+# than "now" does - which reported 24h for a change 43 minutes away.
+SECS_TO_CHANGE=$(( NEXT_EPOCH - NOW_S ))
+(( SECS_TO_CHANGE < 0 )) && SECS_TO_CHANGE=0
 NEXT_LABEL=$(hms $(( NEXT_WMIN % 1440 )))
 
 # Everything below is the user's clock. The schedule is defined in UTC and all
@@ -102,7 +106,7 @@ fi
 
 DAY_SUFFIX=$([ "$NEXT_SAME_DAY" -eq 1 ] && echo '' || echo ' tomorrow')
 
-TOOLTIP=$(printf '%s\n\n%s at %s%s %s - in %s\n\nRates per 1M tokens (%s)\n  deepseek-flash    in %s/%s   out %s     (cache hit/miss)\n  deepseek-v4-pro   in %s/%s   out %s     (cache hit/miss)\n\nPeak hours %s (%s); weekends off-peak all day' \
+TOOLTIP=$(printf '%s\n\n%s at %s%s %s - in %s\n\nRates per 1M tokens (%s)\n  deepseek-flash    in %s/%s   out %s     (cache hit/miss)\n  deepseek-v4-pro   in %s/%s   out %s     (cache hit/miss)\n\nPeak %s (%s); weekends off-peak all day' \
   "$STATUS_NOW" "$BECOMES" "$NEXT_LOCAL_HHMM" "$DAY_SUFFIX" "$ZONE_NAME" "$RATE_COUNTDOWN" "$RATE_LABEL" \
   "$FLASH_HIT" "$FLASH_MISS" "$FLASH_OUT" "$PRO_HIT" "$PRO_MISS" "$PRO_OUT" \
   "$PEAK_WINDOWS" "$ZONE_OFFSET")
