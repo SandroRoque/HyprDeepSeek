@@ -15,8 +15,13 @@ cd ~/Documents/Projects/HyprDeepSeek/deepseek
 ./install.sh
 ```
 
-Requirements: Omarchy/Arch with Waybar, `bash`, `jq`, `python3`, `fontconfig`,
-and `magick`/`rsvg-convert` only if you rebuild the font.
+Requirements: Omarchy/Arch with Waybar, `bash`, `jq`, `python3` and `fontconfig`
+— all present on a default Omarchy install. No `sudo`, nothing system-wide: the
+font goes to `~/.local/share/fonts` and the config to `~/.config/waybar`.
+
+`fontforge` + `python-fonttools` are needed **only** to regenerate the font
+(`make font`); the built `DeepSeekWhale.ttf` is committed, so a plain install
+never needs them.
 
 `install.sh` is **idempotent** — re-run it after any `git pull`. It symlinks the
 resources into place (so this repo stays the source of truth, nothing is copied),
