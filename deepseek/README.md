@@ -7,10 +7,22 @@ the current per-million-token prices.
 Peak hours (from the DeepSeek docs): **Mon-Fri 01:00-04:00 and 06:00-10:00 UTC**.
 Everything else is off-peak at half the rate.
 
-The tooltip reports the **next rate change in both UTC and local time**, labelled
-with the explicit offset (e.g. `03:00 Wed UTC-03:00`), and the peak windows
-converted the same way. The weekday is included because UTC peak windows land on
-the previous/next local day in most zones.
+The tooltip is shown entirely in the **user's local time** — no UTC. It converts
+once via `date`, and says what happens rather than when a UTC boundary falls:
+
+```
+DeepSeek API - off-peak (half price)
+
+Rates rise to full price at 03:00 America/Sao_Paulo - in 24h 46m
+
+Rates per 1M tokens (off-peak)
+  ...
+
+Peak hours 22:00-01:00, 03:00-07:00 (UTC-03:00); weekends off-peak all day
+```
+
+` tomorrow` is appended when the change crosses local midnight. The zone name
+comes from `/etc/localtime`, or `%Z` when that reports a real abbreviation.
 
 ## Install on another machine
 

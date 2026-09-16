@@ -64,58 +64,55 @@ done
 SECS_TO_CHANGE=$(( (NEXT_WMIN - WMIN + 10080) % 10080 * 60 ))
 NEXT_LABEL=$(hms $(( NEXT_WMIN % 1440 )))
 
-# Local rendering of the next change. The weekday is included because a UTC peak
-# window lands on the previous/next local day in many zones. `date +%Z` reports a
-# bare offset here (e.g. "-03") rather than a name, so the label is built.
-NEXT_LOCAL_WMIN=$(( (NEXT_WMIN + TZ_OFFSET + 10080) % 10080 ))
-NEXT_LOCAL_LABEL=$(hms $(( NEXT_LOCAL_WMIN % 1440 )))
-NEXT_LOCAL_DAY=$(date -d "@$NEXT_EPOCH" '+%a')
+# Everything below is the user's clock. The schedule is defined in UTC and all
+# arithmetic stays UTC, but conversion is handed to `date` rather than being
+# reconstructed by hand.
+NEXT_LOCAL_HHMM=$(date -d "@$NEXT_EPOCH" '+%H:%M')
+NEXT_SAME_DAY=$([ "$(date -d "@$NOW_S" '+%Y-%m-%d')" = "$(date -d "@$NEXT_EPOCH" '+%Y-%m-%d')" ] && echo 1 || echo 0)
 
-if ((TZ_OFFSET == 0)); then
-  ZONE_LABEL='UTC'
-else
-  ZONE_SIGN=$([ "$TZ_OFFSET" -lt 0 ] && echo - || echo +)
-  ZONE_ABS=$(( TZ_OFFSET < 0 ? -TZ_OFFSET : TZ_OFFSET ))
-  ZONE_LABEL=$(printf 'UTC%s%02d:%02d' "$ZONE_SIGN" $(( ZONE_ABS / 60 )) $(( ZONE_ABS % 60 )))
+ZONE_NAME=$(date +%Z)                       # e.g. -03 on this machine
+if [[ "$ZONE_NAME" =~ ^[-+][0-9] ]]; then
+  # no abbreviation in the tz data; a zone identifier is more useful than "-03"
+  ZONE_NAME="$(readlink -f /etc/localtime | sed 's|.*/zoneinfo/||')"
 fi
+raw=$(date +%z)                       # e.g. -0300 or +0530
+ZONE_OFFSET="UTC${raw:0:3}:${raw:3:2}"
 
-# The peak windows as they fall in local time (merged where they are adjacent,
-# as 22:00-01:00 and 03:00-07:00 are not).
-loc_window() {
-  local s=$(( ($1 + TZ_OFFSET + 10080) % 1440 ))
-  local e=$(( ($2 - 1 + TZ_OFFSET + 10080) % 1440 ))
-  printf '%s-%s' "$(hms "$s")" "$(hms "$(( (e + 1) % 1440 ))" )"
-}
-LOCAL_WINDOWS="$(loc_window $((1 * 60)) $((4 * 60))), $(loc_window $((6 * 60)) $((10 * 60)))"
+# peak windows in local time, straight from UTC boundaries via `date`
+loc_hhmm() { date -d "@$(( NOW_S - NOW_S % 60 + ($1 - WMIN + 10080) % 10080 * 60 ))" '+%H:%M'; }
+PEAK_WINDOWS="$(loc_hhmm $((1 * 60)))-$(loc_hhmm $((4 * 60))), $(loc_hhmm $((6 * 60)))-$(loc_hhmm $((10 * 60)))"
 
 RATE_COUNTDOWN=$(countdown "$SECS_TO_CHANGE")
 
 if ((CURRENT_STATE == 1)); then
-  STATUS='DeepSeek API - PEAK rates'
-  RATE_LABEL='peak'
-  CLASS='peak'
+  STATUS_NOW='DeepSeek API - peak rates'
+  BECOMES='Rates drop to half price'
   FLASH_HIT=0.006; FLASH_MISS=0.3;  FLASH_OUT=1.2
   PRO_HIT=0.044;   PRO_MISS=1.32;   PRO_OUT=3.96
+  RATE_LABEL='peak'
+  CLASS='peak'
 else
-  STATUS='DeepSeek API - off-peak rates (half price)'
-  RATE_LABEL='off-peak'
-  CLASS='off-peak'
+  STATUS_NOW='DeepSeek API - off-peak (half price)'
+  BECOMES='Rates rise to full price'
   FLASH_HIT=0.003; FLASH_MISS=0.15; FLASH_OUT=0.6
   PRO_HIT=0.022;   PRO_MISS=0.66;   PRO_OUT=1.98
+  RATE_LABEL='off-peak'
+  CLASS='off-peak'
 fi
 
-TOOLTIP=$(printf '%s  |  next change %s UTC (%s %s %s) in %s\n\nRates per 1M tokens (%s)\n  deepseek-flash    in %s/%s   out %s     (cache hit/miss)\n  deepseek-v4-pro   in %s/%s   out %s     (cache hit/miss)\n\npeak = Mon-Fri 01:00-04:00, 06:00-10:00 UTC
-     = weekdays %s in %s  (the UTC day starts the evening before)' \
-  "$STATUS" "$NEXT_LABEL" "$NEXT_LOCAL_LABEL" "$NEXT_LOCAL_DAY" "$ZONE_LABEL" "$RATE_COUNTDOWN" "$RATE_LABEL" \
+DAY_SUFFIX=$([ "$NEXT_SAME_DAY" -eq 1 ] && echo '' || echo ' tomorrow')
+
+TOOLTIP=$(printf '%s\n\n%s at %s%s %s - in %s\n\nRates per 1M tokens (%s)\n  deepseek-flash    in %s/%s   out %s     (cache hit/miss)\n  deepseek-v4-pro   in %s/%s   out %s     (cache hit/miss)\n\nPeak hours %s (%s); weekends off-peak all day' \
+  "$STATUS_NOW" "$BECOMES" "$NEXT_LOCAL_HHMM" "$DAY_SUFFIX" "$ZONE_NAME" "$RATE_COUNTDOWN" "$RATE_LABEL" \
   "$FLASH_HIT" "$FLASH_MISS" "$FLASH_OUT" "$PRO_HIT" "$PRO_MISS" "$PRO_OUT" \
-  "$LOCAL_WINDOWS" "$ZONE_LABEL")
+  "$PEAK_WINDOWS" "$ZONE_OFFSET")
 
 case "${1:-json}" in
   json)    jq -cn --arg tooltip "$TOOLTIP" --arg class "$CLASS" '{tooltip: $tooltip, class: $class}' ;;
   state)   if ((CURRENT_STATE == 1)); then echo peak; else echo off-peak; fi ;;
-  next)    echo "$NEXT_LABEL" ;;
+  next)    echo "$NEXT_LOCAL_HHMM" ;;
   secs)    echo "$SECS_TO_CHANGE" ;;
   notify)  sender=$(command -v omarchy-notification-send || command -v notify-send)
-           "$sender" -u low -a "DeepSeek price" "$STATUS" "$TOOLTIP" ;;
+           "$sender" -u low -a "DeepSeek price" "$STATUS_NOW" "$TOOLTIP" ;;
   *)       echo "Usage: $(basename "$0") {json|state|next|secs|notify}" >&2; exit 2 ;;
 esac
