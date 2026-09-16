@@ -51,12 +51,72 @@ PY
   say "removed; Waybar restarted"
 }
 
-if [[ "${1:-install}" == "uninstall" ]]; then
-  uninstall
-  exit 0
-fi
+FORCE=0
+CMD=install
+for arg in "$@"; do
+  case "$arg" in
+    uninstall|status|install) CMD="$arg" ;;
+    --force|-f)               FORCE=1 ;;
+    *) echo "Usage: $(basename "$0") [install|uninstall|status] [--force]" >&2; exit 2 ;;
+  esac
+done
+
+[[ "$CMD" == "uninstall" ]] && { uninstall; exit 0; }
+
+# where is this install currently pointing, if anywhere?
+current_target() {  # $1 = symlink path
+  [[ -L "$1" ]] || return 1
+  readlink -f "$1" 2>/dev/null || return 1
+}
+
+status() {
+  echo "DeepSeek rate whale"
+  for pair in "$WB_SCRIPTS/deepseek-price|script" "$WB_FONTS/$FONT_NAME|font"; do
+    link="${pair%%|*}"; what="${pair##*|}"
+    if [[ -L "$link" ]]; then
+      printf '  %-7s -> %s\n' "$what" "$(readlink -f "$link")"
+    elif [[ -e "$link" ]]; then
+      printf '  %-7s present but NOT a symlink (%s)\n' "$what" "$link"
+    else
+      printf '  %-7s not installed\n' "$what"
+    fi
+  done
+  [[ -e "$WB_SCRIPTS/deepseek-price" ]] && printf '  state   %s, next %s UTC\n' \
+    "$("$WB_SCRIPTS/deepseek-price" state 2>/dev/null || echo '?')" \
+    "$("$WB_SCRIPTS/deepseek-price" next 2>/dev/null || echo '?')"
+}
+
+[[ "$CMD" == "status" ]] && { status; exit 0; }
 
 echo "Installing the DeepSeek rate whale"
+
+# 0. refuse to hijack an install that points at a different checkout ----------
+# Keeps the repo relocatable (any path works) without letting a second clone
+# silently take over from a working one.
+conflict=""
+for pair in "$WB_SCRIPTS/deepseek-price|$RES/deepseek-price" \
+            "$WB_FONTS/$FONT_NAME|$FONT_SRC"; do
+  link="${pair%%|*}"; want="${pair##*|}"
+  [[ "$want" == "$(readlink -f "$link" 2>/dev/null)" ]] && continue
+  if [[ -e "$link" || -L "$link" ]]; then
+    conflict+="    $(basename "$link")"$'\n'
+    conflict+="      installed: $(readlink -f "$link" 2>/dev/null || echo "$link (not a symlink)")"$'\n'
+    conflict+="      this repo: $want"$'\n'
+  fi
+done
+if [[ -n "$conflict" && "$FORCE" -eq 0 ]]; then
+  cat >&2 <<EOF
+ERROR: an install already exists and points elsewhere:
+
+$conflict
+Refusing to take over silently. Either:
+  - run the installer from the checkout you want live (that path is listed above), or
+  - re-run with --force to replace it with this repository.
+
+Nothing was changed.
+EOF
+  exit 1
+fi
 
 # 1. preflight --------------------------------------------------------------
 [[ -f "$FONT_SRC" ]] || { echo "ERROR: missing $FONT_SRC (run 'make font')"; exit 1; }
