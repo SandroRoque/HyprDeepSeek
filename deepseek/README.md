@@ -7,6 +7,11 @@ the current per-million-token prices.
 Peak hours (from the DeepSeek docs): **Mon-Fri 01:00-04:00 and 06:00-10:00 UTC**.
 Everything else is off-peak at half the rate.
 
+The tooltip reports the **next rate change in both UTC and local time**, labelled
+with the explicit offset (e.g. `03:00 Wed UTC-03:00`), and the peak windows
+converted the same way. The weekday is included because UTC peak windows land on
+the previous/next local day in most zones.
+
 ## Install on another machine
 
 ```sh

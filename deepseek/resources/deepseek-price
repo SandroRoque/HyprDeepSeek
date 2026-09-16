@@ -49,19 +49,45 @@ in_peak "$H" "$DOW" && CURRENT_STATE=1
 # Minutes since Monday 00:00 of the next minute whose state differs from now.
 # Pure arithmetic on the epoch: no clock strings, so no octal/wrap surprises.
 NEXT_WMIN=$WMIN
+NEXT_EPOCH=$NOW_S
 for ((t = NOW_EPOCH + 60; t <= NOW_EPOCH + 60 * 60 * 24 * 11; t += 60)); do
   w=$(( ( (t / 60) + 5760 ) % 10080 ))
   s=0
   in_peak $(( (w % 1440) / 60 )) $(( w / 1440 + 1 )) && s=1
   if ((s != CURRENT_STATE)); then
     NEXT_WMIN=$w
+    NEXT_EPOCH=$t          # real epoch, so the local weekday needs no reconstruction
     break
   fi
 done
 
 SECS_TO_CHANGE=$(( (NEXT_WMIN - WMIN + 10080) % 10080 * 60 ))
 NEXT_LABEL=$(hms $(( NEXT_WMIN % 1440 )))
-NEXT_LOCAL_LABEL=$(hms $(( (NEXT_WMIN - TZ_OFFSET + 10080) % 10080 % 1440 )))
+
+# Local rendering of the next change. The weekday is included because a UTC peak
+# window lands on the previous/next local day in many zones. `date +%Z` reports a
+# bare offset here (e.g. "-03") rather than a name, so the label is built.
+NEXT_LOCAL_WMIN=$(( (NEXT_WMIN + TZ_OFFSET + 10080) % 10080 ))
+NEXT_LOCAL_LABEL=$(hms $(( NEXT_LOCAL_WMIN % 1440 )))
+NEXT_LOCAL_DAY=$(date -d "@$NEXT_EPOCH" '+%a')
+
+if ((TZ_OFFSET == 0)); then
+  ZONE_LABEL='UTC'
+else
+  ZONE_SIGN=$([ "$TZ_OFFSET" -lt 0 ] && echo - || echo +)
+  ZONE_ABS=$(( TZ_OFFSET < 0 ? -TZ_OFFSET : TZ_OFFSET ))
+  ZONE_LABEL=$(printf 'UTC%s%02d:%02d' "$ZONE_SIGN" $(( ZONE_ABS / 60 )) $(( ZONE_ABS % 60 )))
+fi
+
+# The peak windows as they fall in local time (merged where they are adjacent,
+# as 22:00-01:00 and 03:00-07:00 are not).
+loc_window() {
+  local s=$(( ($1 + TZ_OFFSET + 10080) % 1440 ))
+  local e=$(( ($2 - 1 + TZ_OFFSET + 10080) % 1440 ))
+  printf '%s-%s' "$(hms "$s")" "$(hms "$(( (e + 1) % 1440 ))" )"
+}
+LOCAL_WINDOWS="$(loc_window $((1 * 60)) $((4 * 60))), $(loc_window $((6 * 60)) $((10 * 60)))"
+
 RATE_COUNTDOWN=$(countdown "$SECS_TO_CHANGE")
 
 if ((CURRENT_STATE == 1)); then
@@ -78,9 +104,11 @@ else
   PRO_HIT=0.022;   PRO_MISS=0.66;   PRO_OUT=1.98
 fi
 
-TOOLTIP=$(printf '%s  |  next change %s UTC (%s local) in %s\n\nRates per 1M tokens (%s)\n  deepseek-flash    in %s/%s   out %s     (cache hit/miss)\n  deepseek-v4-pro   in %s/%s   out %s     (cache hit/miss)\n\npeak = Mon-Fri 01:00-04:00, 06:00-10:00 UTC  |  off-peak = half price' \
-  "$STATUS" "$NEXT_LABEL" "$NEXT_LOCAL_LABEL" "$RATE_COUNTDOWN" "$RATE_LABEL" \
-  "$FLASH_HIT" "$FLASH_MISS" "$FLASH_OUT" "$PRO_HIT" "$PRO_MISS" "$PRO_OUT")
+TOOLTIP=$(printf '%s  |  next change %s UTC (%s %s %s) in %s\n\nRates per 1M tokens (%s)\n  deepseek-flash    in %s/%s   out %s     (cache hit/miss)\n  deepseek-v4-pro   in %s/%s   out %s     (cache hit/miss)\n\npeak = Mon-Fri 01:00-04:00, 06:00-10:00 UTC
+     = weekdays %s in %s  (the UTC day starts the evening before)' \
+  "$STATUS" "$NEXT_LABEL" "$NEXT_LOCAL_LABEL" "$NEXT_LOCAL_DAY" "$ZONE_LABEL" "$RATE_COUNTDOWN" "$RATE_LABEL" \
+  "$FLASH_HIT" "$FLASH_MISS" "$FLASH_OUT" "$PRO_HIT" "$PRO_MISS" "$PRO_OUT" \
+  "$LOCAL_WINDOWS" "$ZONE_LABEL")
 
 case "${1:-json}" in
   json)    jq -cn --arg tooltip "$TOOLTIP" --arg class "$CLASS" '{tooltip: $tooltip, class: $class}' ;;
