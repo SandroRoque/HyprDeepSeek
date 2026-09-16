@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+#
+# DeepSeek API rate state and hover text.
+#
+# Peak hours (docs): Monday-Friday 01:00-04:00 and 06:00-10:00 UTC. Everything
+# else is off-peak at half the rate. All arithmetic is in UTC minutes since
+# Monday 00:00, so no local-time or day-boundary confusion is possible.
+#
+# A Waybar `custom/deepseek` module calls `json`: the glyph comes from the
+# module's `format` and the colour from CSS, so this script only reports state
+# and text.
+#
+# Subcommands: json (default) | state | next | secs | notify
+
+set -u
+
+# ---------------------------------------------------------------- schedule ---
+# Weekday convention: 1=Mon .. 7=Sun (matches `date +%u`)
+in_peak() {
+  local hour=$1 dow=$2
+  ((dow >= 1 && dow <= 5)) || return 1
+  ((hour >= 1 && hour < 4)) && return 0
+  ((hour >= 6 && hour < 10)) && return 0
+  return 1
+}
+
+hms() { printf '%02d:%02d' $(( $1 / 60 )) $(( $1 % 60 )); }
+
+countdown() {
+  local m=$(( ($1 + 30) / 60 ))
+  if ((m <= 0)); then printf 'now'
+  elif ((m >= 60)); then printf '%dh %dm' $((m / 60)) $((m % 60))
+  else printf '%dm' "$m"; fi
+}
+
+# ------------------------------------------------------------------- clock ---
+NOW_S=${DS_NOW:-$(date -u +%s)}
+
+read -r _H _M _DOW NOW_EPOCH <<<"$(date -u -d "@$NOW_S" '+%H %M %u %s')"
+H=$((10#$_H)); M=$((10#$_M)); DOW=$((10#$_DOW))
+WMIN=$(( (DOW - 1) * 1440 + H * 60 + M ))
+LOCAL_MIN=$(( 10#$(date -d "@$NOW_S" '+%H') * 60 + 10#$(date -d "@$NOW_S" '+%M') ))
+TZ_OFFSET=$(( LOCAL_MIN - (H * 60 + M) ))
+
+CURRENT_STATE=0
+in_peak "$H" "$DOW" && CURRENT_STATE=1
+
+# --------------------------------------------------- next rate transition ---
+# Minutes since Monday 00:00 of the next minute whose state differs from now.
+# Pure arithmetic on the epoch: no clock strings, so no octal/wrap surprises.
+NEXT_WMIN=$WMIN
+for ((t = NOW_EPOCH + 60; t <= NOW_EPOCH + 60 * 60 * 24 * 11; t += 60)); do
+  w=$(( ( (t / 60) + 5760 ) % 10080 ))
+  s=0
+  in_peak $(( (w % 1440) / 60 )) $(( w / 1440 + 1 )) && s=1
+  if ((s != CURRENT_STATE)); then
+    NEXT_WMIN=$w
+    break
+  fi
+done
+
+SECS_TO_CHANGE=$(( (NEXT_WMIN - WMIN + 10080) % 10080 * 60 ))
+NEXT_LABEL=$(hms $(( NEXT_WMIN % 1440 )))
+NEXT_LOCAL_LABEL=$(hms $(( (NEXT_WMIN - TZ_OFFSET + 10080) % 10080 % 1440 )))
+RATE_COUNTDOWN=$(countdown "$SECS_TO_CHANGE")
+
+if ((CURRENT_STATE == 1)); then
+  STATUS='DeepSeek API - PEAK rates'
+  RATE_LABEL='peak'
+  CLASS='peak'
+  FLASH_HIT=0.006; FLASH_MISS=0.3;  FLASH_OUT=1.2
+  PRO_HIT=0.044;   PRO_MISS=1.32;   PRO_OUT=3.96
+else
+  STATUS='DeepSeek API - off-peak rates (half price)'
+  RATE_LABEL='off-peak'
+  CLASS='off-peak'
+  FLASH_HIT=0.003; FLASH_MISS=0.15; FLASH_OUT=0.6
+  PRO_HIT=0.022;   PRO_MISS=0.66;   PRO_OUT=1.98
+fi
+
+TOOLTIP=$(printf '%s  |  next change %s UTC (%s local) in %s\n\nRates per 1M tokens (%s)\n  deepseek-flash    in %s/%s   out %s     (cache hit/miss)\n  deepseek-v4-pro   in %s/%s   out %s     (cache hit/miss)\n\npeak = Mon-Fri 01:00-04:00, 06:00-10:00 UTC  |  off-peak = half price' \
+  "$STATUS" "$NEXT_LABEL" "$NEXT_LOCAL_LABEL" "$RATE_COUNTDOWN" "$RATE_LABEL" \
+  "$FLASH_HIT" "$FLASH_MISS" "$FLASH_OUT" "$PRO_HIT" "$PRO_MISS" "$PRO_OUT")
+
+case "${1:-json}" in
+  json)    jq -cn --arg tooltip "$TOOLTIP" --arg class "$CLASS" '{tooltip: $tooltip, class: $class}' ;;
+  state)   if ((CURRENT_STATE == 1)); then echo peak; else echo off-peak; fi ;;
+  next)    echo "$NEXT_LABEL" ;;
+  secs)    echo "$SECS_TO_CHANGE" ;;
+  notify)  sender=$(command -v omarchy-notification-send || command -v notify-send)
+           "$sender" -u low -a "DeepSeek price" "$STATUS" "$TOOLTIP" ;;
+  *)       echo "Usage: $(basename "$0") {json|state|next|secs|notify}" >&2; exit 2 ;;
+esac
